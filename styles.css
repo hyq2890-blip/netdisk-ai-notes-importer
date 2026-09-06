@@ -1,0 +1,105 @@
+.baidu-ai-timestamp {
+  color: var(--link-color);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  margin-left: 0.35em;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  vertical-align: baseline;
+}
+
+.baidu-ai-timestamp:hover,
+.baidu-ai-timestamp:focus-visible {
+  color: var(--link-color-hover);
+  outline: none;
+}
+
+.baidu-ai-timestamp-editor {
+  user-select: none;
+}
+
+.baidu-ai-note a[href*="pan.baidu.com/pfile/video"][href*="#t="] {
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reading layout for notes managed by this plugin. */
+.baidu-ai-note.markdown-preview-view .markdown-preview-sizer {
+  max-width: 920px;
+  padding-bottom: 12vh;
+}
+
+.baidu-ai-note.markdown-preview-view {
+  --baidu-ai-soft-accent: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+}
+
+.baidu-ai-note h1 {
+  border-bottom: 1px solid var(--background-modifier-border);
+  margin-bottom: 1.8rem;
+  padding-bottom: 0.65rem;
+}
+
+.baidu-ai-note h2 {
+  background: linear-gradient(90deg, var(--baidu-ai-soft-accent), transparent 85%);
+  border-left: 4px solid var(--interactive-accent);
+  border-radius: 0 8px 8px 0;
+  font-size: 1.45em;
+  margin-top: 2.4rem;
+  padding: 0.5em 0.75em;
+}
+
+.baidu-ai-note h3 {
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  font-size: 1.2em;
+  margin-top: 1.8rem;
+  padding-bottom: 0.35em;
+}
+
+.baidu-ai-note h4 {
+  color: var(--text-normal);
+  font-size: 1.05em;
+  margin-bottom: 0.55rem;
+  margin-top: 1.35rem;
+}
+
+.baidu-ai-note :is(ul, ol) {
+  line-height: 1.72;
+}
+
+.baidu-ai-note li::marker {
+  color: var(--interactive-accent);
+}
+
+.baidu-ai-note img {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+  display: block;
+  margin: 1rem auto 1.25rem;
+  max-height: 70vh;
+  max-width: min(100%, 760px);
+  object-fit: contain;
+}
+
+.baidu-ai-note table {
+  display: table;
+  font-size: 0.9em;
+  margin: 1.25rem 0;
+  width: 100%;
+}
+
+.baidu-ai-note th {
+  background: var(--baidu-ai-soft-accent);
+  color: var(--text-normal);
+}
+
+.baidu-ai-note :is(th, td) {
+  line-height: 1.55;
+  padding: 0.65em 0.75em;
+}

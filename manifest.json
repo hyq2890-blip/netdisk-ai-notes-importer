@@ -1,0 +1,9 @@
+{
+  "id": "baidu-ai-notes",
+  "name": "Netdisk AI Notes Importer",
+  "version": "0.7.1",
+  "minAppVersion": "1.8.0",
+  "description": "将百度网盘 AI 视频笔记导入 Obsidian，支持批量导入、原视频时间戳跳转与本地同步。",
+  "author": "不要黑眼圈",
+  "isDesktopOnly": true
+}

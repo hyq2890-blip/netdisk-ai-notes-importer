@@ -1,0 +1,16 @@
+{
+  "name": "netdisk-ai-notes-importer",
+  "version": "0.7.1",
+  "description": "Import Baidu Netdisk AI video notes into Obsidian with batch import and timestamp seeking.",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/verify-release.mjs",
+    "test": "node scripts/test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "不要黑眼圈"
+}
