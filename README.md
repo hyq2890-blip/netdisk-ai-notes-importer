@@ -1,5 +1,30 @@
 # Netdisk AI Notes Importer
 
+Import Baidu Netdisk AI video notes into Obsidian as local Markdown, with batch import, clickable original-video timestamps, image downloads, and incremental sync. Imported notes can also be used in a Media Extended video-note workflow. Media Extended is optional; no internal API integration is required.
+
+## Installation
+
+Currently confirmed on Windows desktop only. Enable the core **Web Viewer** plugin in Obsidian. The plugin interface is currently in Chinese.
+
+1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest GitHub release](https://github.com/hyq2890-blip/netdisk-ai-notes-importer/releases/latest).
+2. Create the folder `.obsidian/plugins/baidu-ai-notes/` inside your vault and copy these three files into it.
+3. Restart Obsidian and enable **Netdisk AI Notes Importer** under Settings → Community plugins.
+4. When upgrading, keep your existing `data.json` settings file.
+
+## Usage
+
+1. Open an existing Baidu Netdisk online AI note in Obsidian's Web Viewer and wait for its contents to load. You need access to the note and its original video; sign in to Baidu Netdisk when prompted.
+2. Click the left ribbon button **导入或同步百度 AI 笔记** to import a note. If a managed local note is active, this button synchronizes it instead.
+3. To batch import, open several AI note tabs and click **批量导入所有已打开的百度 AI 笔记**. Previously imported notes are skipped.
+4. Click a timestamp in the imported Markdown to open or seek the original video. The AI note page does not need to stay open. Playback still depends on the source link, permissions, and browser session.
+5. Continue editing the Markdown directly, or use Media Extended for your video-note workflow. Incremental sync keeps existing sections and adds new heading sections; replacement sync overwrites the plugin-managed region.
+
+## Network and privacy
+
+The plugin reads opened Baidu Netdisk note pages, opens original video pages, and optionally downloads images from their source URLs. It stores Markdown, images, source URLs, and video mappings locally in the vault and plugin settings. Duplicate detection enumerates Markdown files and checks their cached metadata across the vault, including notes moved outside the default folder. Synchronization reads and updates the selected managed note. The plugin has no telemetry or backend upload service; website sessions are managed by Baidu Netdisk and Web Viewer. This is an unofficial project, not affiliated with Baidu or Media Extended.
+
+## 中文说明
+
 将百度网盘 AI 视频笔记导入 Obsidian，保留可跳转的原视频时间戳，并可配合 Media Extended 继续整理视频笔记。
 
 > 当前版本仅确认支持 Obsidian Windows 桌面版。插件依赖 Obsidian 核心插件“网页浏览器”（Web Viewer），暂未验证 macOS、Linux 和移动端。
@@ -93,6 +118,8 @@ Media Extended 不是必需依赖。只有在你希望继续使用 Media Extende
 - 启用“自动下载图片”时，从笔记图片的原始网络地址下载图片到你的 Vault；图片可能由百度或页面引用的 CDN 提供。
 
 插件会在本地保存：
+
+为识别已经导入或移动到其他文件夹的笔记，插件会枚举 Vault 内的 Markdown 文件并检查缓存的来源属性；同步时读取和更新选中的受管理笔记。这是审核中“Vault Enumeration”提示所对应的行为。
 
 - 导入笔记的来源页面地址、原视频地址、页面标识和导入时间，写入对应 Markdown 文件的 YAML 属性。
 - AI 笔记页面与原视频地址的对应关系，以及插件设置，写入插件目录的 `data.json`。

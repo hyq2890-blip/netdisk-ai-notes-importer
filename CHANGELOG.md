@@ -2,6 +2,13 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## 0.7.2 - 2026-09-07
+
+- 修正市场简介：移除冗余的 Obsidian 字样，采用以英文句号结尾的英文功能描述。
+- 保留中文教程，补充英文介绍、Installation、Usage 和网络隐私说明。
+- 说明去重扫描 Vault 内 Markdown 文件缓存属性的用途。
+- 加强发布检查，防止简介格式问题再次出现；功能代码与 0.7.1 保持一致。
+
 ## 0.7.1 - 2026-09-06
 
 - 显示名称更新为 Netdisk AI Notes Importer，作者更新为“不要黑眼圈”。
