@@ -13,6 +13,19 @@ const [manifest, versions, pkg] = await Promise.all([
 ]);
 
 const errors = [];
+if (/obsidian/i.test(manifest.description || "")) {
+  errors.push("市场简介不得包含 Obsidian 字样");
+}
+if (!/[.!?]$/.test(manifest.description || "")) {
+  errors.push("市场简介必须以英文句末标点结尾");
+}
+if ((manifest.description || "").length > 250) {
+  errors.push("市场简介不得超过 250 个字符");
+}
+const readme = await readFile(join(root, "README.md"), "utf8");
+for (const heading of ["Installation", "Usage"]) {
+  if (!readme.includes(`## ${heading}`)) errors.push(`README 缺少 ${heading} 说明`);
+}
 const requiredManifestFields = [
   "id",
   "name",
