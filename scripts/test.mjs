@@ -10,7 +10,7 @@ class Base {}
 const context = {
   module: { exports: {} }, console, URL, URLSearchParams,
   require(name) {
-    if (name === 'obsidian') return { Plugin: Base, PluginSettingTab: Base };
+    if (name === 'obsidian') return { Plugin: Base, PluginSettingTab: Base, SuggestModal: Base };
     if (name === '@codemirror/view') return { WidgetType: Base };
     throw new Error(`Unexpected dependency: ${name}`);
   },

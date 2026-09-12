@@ -116,15 +116,28 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
   }
+  async selectImportFolder() {
+    try {
+      const folder = this.settings.askNotesFolder
+        ? await chooseNotesFolder(this.app, this.settings.notesFolder)
+        : this.settings.notesFolder;
+      return folder === null ? null : validateNotesFolder(this.app, folder);
+    } catch (error) {
+      new import_obsidian4.Notice(messageOf(error));
+      return null;
+    }
+  }
   async importCurrentNote() {
     const webview = findFcbWebview();
     if (!webview) {
       new import_obsidian4.Notice("\u672A\u627E\u5230\u5DF2\u6253\u5F00\u7684\u767E\u5EA6 FCB AI \u7B14\u8BB0\u3002\u8BF7\u5148\u5728 Obsidian Web Viewer \u4E2D\u6253\u5F00\u7B14\u8BB0\u3002");
       return;
     }
+    const notesFolder = await this.selectImportFolder();
+    if (notesFolder === null) return;
     const notice = new import_obsidian4.Notice("\u6B63\u5728\u5BFC\u5165\u767E\u5EA6 AI \u7B14\u8BB0\u2026", 0);
     try {
-      const result = await this.importWebview(webview, notice, this.settings.openVideoAfterImport);
+      const result = await this.importWebview(webview, notice, this.settings.openVideoAfterImport, notesFolder);
       notice.hide();
       if (result.skipped) {
         new import_obsidian4.Notice("\u8FD9\u7BC7\u767E\u5EA6 AI \u7B14\u8BB0\u5DF2\u5B58\u5728\uFF0C\u5DF2\u6253\u5F00\u672C\u5730\u7B14\u8BB0\uFF0C\u672A\u91CD\u590D\u722C\u53D6");
@@ -143,6 +156,8 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice("\u6CA1\u6709\u627E\u5230\u5DF2\u6253\u5F00\u7684\u767E\u5EA6 FCB AI \u7B14\u8BB0");
       return;
     }
+    const notesFolder = await this.selectImportFolder();
+    if (notesFolder === null) return;
     const notice = new import_obsidian4.Notice(`\u51C6\u5907\u6279\u91CF\u5BFC\u5165 ${webviews.length} \u7BC7\u767E\u5EA6 AI \u7B14\u8BB0\u2026`, 0);
     let imported = 0;
     let skipped = 0;
@@ -160,7 +175,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       }
       seen.add(identity);
       try {
-        const result = await this.importWebview(webview, notice, false);
+        const result = await this.importWebview(webview, notice, false, notesFolder);
         if (result.skipped) skipped += 1;
         else imported += 1;
       } catch (error) {
@@ -172,7 +187,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
     const summary = `\u6279\u91CF\u5BFC\u5165\u5B8C\u6210\uFF1A\u6210\u529F ${imported}\uFF0C\u8DF3\u8FC7 ${skipped}\uFF0C\u5931\u8D25 ${failed}`;
     new import_obsidian4.Notice(summary, failed > 0 ? 1e4 : 6e3);
   }
-  async importWebview(webview, notice, keepVideoAfterImport) {
+  async importWebview(webview, notice, keepVideoAfterImport, notesFolder) {
     var _a, _b;
     let temporaryVideoViews = [];
     const currentUrl = safeWebviewUrl(webview);
@@ -204,11 +219,11 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       vault: this.app.vault,
       html: snapshot.html,
       noteTitle: snapshot.title,
-      attachmentsFolder: this.settings.attachmentsFolder,
+      attachmentsFolder: noteAttachmentsFolder(notesFolder),
       downloadImages: this.settings.downloadImages,
       videoUrl
     });
-    const path = await this.createNotePath(snapshot.title);
+    const path = await this.createNotePath(snapshot.title, notesFolder);
     const content = this.composeNote(snapshot.title, snapshot.url, videoUrl, markdown);
     const file = await this.app.vault.create(path, content);
     await this.openFileReplacingWebview(webview, file);
@@ -248,7 +263,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
         vault: this.app.vault,
         html: snapshot.html,
         noteTitle: snapshot.title,
-        attachmentsFolder: this.settings.attachmentsFolder,
+        attachmentsFolder: noteAttachmentsFolder(file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ""),
         downloadImages: this.settings.downloadImages,
         videoUrl
       });
@@ -426,8 +441,8 @@ ${markdown}
 ${END_MARKER}
 `;
   }
-  async createNotePath(title) {
-    const folder = (0, import_obsidian4.normalizePath)(this.settings.notesFolder.trim().replace(/^[/\\]+|[/\\]+$/g, ""));
+  async createNotePath(title, notesFolder = this.settings.notesFolder) {
+    const folder = validateNotesFolder(this.app, notesFolder);
     if (folder) await ensureFolder2(this, folder);
     const stem = sanitizeFileName(title);
     let path = (0, import_obsidian4.normalizePath)(folder ? `${folder}/${stem}.md` : `${stem}.md`);

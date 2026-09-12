@@ -1104,6 +1104,81 @@ function secondsFromHref(value) {
   }
 }
 
+// A destination belongs to one import operation, never to shared mutable settings.
+var folderObsidian = require("obsidian");
+function validateNotesFolder(app, value) {
+  const raw = value.trim().replace(/\\/g, "/");
+  if (raw.startsWith("/") || /[:*?"<>|\x00-\x1f]/.test(raw)) throw new Error("请输入 Vault 内的相对文件夹路径");
+  const parts = raw.split("/").filter(Boolean);
+  if (parts.some(part => part === "." || part === ".." || part.startsWith(".") || /[. ]$/.test(part))) throw new Error("文件夹名称不能以点开头、以点或空格结尾，也不能包含 ..");
+  let path = "";
+  for (const part of parts) {
+    path = path ? `${path}/${part}` : part;
+    const existing = app.vault.getAbstractFileByPath(path);
+    if (existing && !(existing instanceof folderObsidian.TFolder)) throw new Error(`路径已被文件占用：${path}`);
+  }
+  return parts.join("/");
+}
+var NotesFolderPicker = class extends folderObsidian.SuggestModal {
+  constructor(app, initial, resolve) {
+    super(app);
+    this.initial = initial;
+    this.resolve = resolve;
+    this.setPlaceholder("搜索已有文件夹，或输入新路径（留空可选根目录）");
+  }
+  onOpen() {
+    super.onOpen();
+    this.inputEl.value = this.initial;
+    this.inputEl.dispatchEvent(new Event("input"));
+    this.inputEl.select();
+  }
+  getSuggestions(query) {
+    const folders = this.app.vault.getAllLoadedFiles().filter(file => file instanceof folderObsidian.TFolder && file.path !== "/").map(file => file.path);
+    const matches = ["", ...folders.sort((a, b) => a.localeCompare(b))].filter(path => path.toLowerCase().includes(query.trim().toLowerCase())).map(path => ({ path, create: false }));
+    try {
+      const path = validateNotesFolder(this.app, query);
+      if (path && !folders.includes(path)) matches.unshift({ path, create: true });
+    } catch (error) {
+      matches.unshift({ error: error.message });
+    }
+    return matches;
+  }
+  renderSuggestion(item, el) {
+    el.setText(item.error || (item.create ? `新建文件夹：${item.path}` : item.path || "Vault 根目录"));
+  }
+  selectSuggestion(item, event) {
+    // Invalid input must leave the picker open so the user can correct it.
+    try {
+      if (item.error) throw new Error(item.error);
+      validateNotesFolder(this.app, item.path);
+    } catch (error) {
+      new folderObsidian.Notice(error.message);
+      return;
+    }
+    this.selectedPath = item.path;
+    super.selectSuggestion(item, event);
+  }
+  onChooseSuggestion(item) { this.finish(item.path); }
+  finish(value) {
+    if (this.resolve) {
+      const resolve = this.resolve;
+      this.resolve = null;
+      resolve(value);
+    }
+  }
+  onClose() {
+    super.onClose();
+    this.finish(this.selectedPath === undefined ? null : this.selectedPath);
+  }
+};
+function chooseNotesFolder(app, initial) {
+  return new Promise(resolve => new NotesFolderPicker(app, initial, resolve).open());
+}
+
+function noteAttachmentsFolder(folder) {
+  return folder ? `${folder}/attachments` : "attachments";
+}
+
 // Settings UI.
 var import_obsidian2 = require("obsidian");
 var NetdiskAiNotesSettingTab = class extends import_obsidian2.PluginSettingTab {
@@ -1114,15 +1189,22 @@ var NetdiskAiNotesSettingTab = class extends import_obsidian2.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian2.Setting(containerEl).setName("AI \u7B14\u8BB0\u4FDD\u5B58\u76EE\u5F55").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Markdown \u4FDD\u5B58\u76EE\u5F55").setDesc("\u76F8\u5BF9\u4E8E Vault \u6839\u76EE\u5F55\uFF1B\u7559\u7A7A\u8868\u793A\u6839\u76EE\u5F55\u3002").addText((text) => text.setPlaceholder("Netdisk AI Notes Importer").setValue(this.plugin.settings.notesFolder).onChange(async (value) => {
-      this.plugin.settings.notesFolder = value.trim();
+    new import_obsidian2.Setting(containerEl).setName("保存位置").setHeading();
+    new import_obsidian2.Setting(containerEl).setName("导入前询问保存文件夹").setDesc("开启：每次导入选择文件夹，批量导入只选一次。关闭：始终使用固定文件夹。").addToggle(toggle => toggle.setValue(this.plugin.settings.askNotesFolder).onChange(async value => {
+      this.plugin.settings.askNotesFolder = value;
       await this.plugin.saveSettings();
+      this.display();
     }));
-    new import_obsidian2.Setting(containerEl).setName("\u56FE\u7247\u9644\u4EF6\u76EE\u5F55").setDesc("\u767E\u5EA6 AI \u7B14\u8BB0\u56FE\u7247\u4FDD\u5B58\u4F4D\u7F6E\uFF0C\u76F8\u5BF9\u4E8E Vault \u6839\u76EE\u5F55\u3002").addText((text) => text.setPlaceholder("Netdisk AI Notes Importer/attachments").setValue(this.plugin.settings.attachmentsFolder).onChange(async (value) => {
-      this.plugin.settings.attachmentsFolder = value.trim();
-      await this.plugin.saveSettings();
-    }));
+    if (!this.plugin.settings.askNotesFolder) {
+      new import_obsidian2.Setting(containerEl).setName("固定保存文件夹").setDesc(this.plugin.settings.notesFolder || "Vault 根目录").addButton(button => button.setButtonText("选择或新建文件夹").onClick(async () => {
+        const folder = await chooseNotesFolder(this.app, this.plugin.settings.notesFolder);
+        if (folder === null) return;
+        this.plugin.settings.notesFolder = folder;
+        await this.plugin.saveSettings();
+        this.display();
+      }));
+    }
+    new import_obsidian2.Setting(containerEl).setName("图片随笔记保存").setDesc("下载的图片自动保存到笔记所在文件夹的 attachments 子目录，无需单独设置。同步时使用笔记当前所在文件夹，已有图片和链接保持原样。");
     new import_obsidian2.Setting(containerEl).setName("\u81EA\u52A8\u4E0B\u8F7D\u56FE\u7247").setDesc("\u5173\u95ED\u65F6\u4FDD\u7559\u767E\u5EA6 CDN \u56FE\u7247\u5730\u5740\u3002").addToggle((toggle) => toggle.setValue(this.plugin.settings.downloadImages).onChange(async (value) => {
       this.plugin.settings.downloadImages = value;
       await this.plugin.saveSettings();
@@ -1144,6 +1226,7 @@ var NetdiskAiNotesSettingTab = class extends import_obsidian2.PluginSettingTab {
 
 // Default settings.
 var DEFAULT_SETTINGS = {
+  askNotesFolder: true,
   notesFolder: "Netdisk AI Notes Importer",
   attachmentsFolder: "Netdisk AI Notes Importer/attachments",
   openVideoAfterImport: false,
@@ -1548,15 +1631,28 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
   }
+  async selectImportFolder() {
+    try {
+      const folder = this.settings.askNotesFolder
+        ? await chooseNotesFolder(this.app, this.settings.notesFolder)
+        : this.settings.notesFolder;
+      return folder === null ? null : validateNotesFolder(this.app, folder);
+    } catch (error) {
+      new import_obsidian4.Notice(messageOf(error));
+      return null;
+    }
+  }
   async importCurrentNote() {
     const webview = findFcbWebview();
     if (!webview) {
       new import_obsidian4.Notice("\u672A\u627E\u5230\u5DF2\u6253\u5F00\u7684\u767E\u5EA6 FCB AI \u7B14\u8BB0\u3002\u8BF7\u5148\u5728 Obsidian Web Viewer \u4E2D\u6253\u5F00\u7B14\u8BB0\u3002");
       return;
     }
+    const notesFolder = await this.selectImportFolder();
+    if (notesFolder === null) return;
     const notice = new import_obsidian4.Notice("\u6B63\u5728\u5BFC\u5165\u767E\u5EA6 AI \u7B14\u8BB0\u2026", 0);
     try {
-      const result = await this.importWebview(webview, notice, this.settings.openVideoAfterImport);
+      const result = await this.importWebview(webview, notice, this.settings.openVideoAfterImport, notesFolder);
       notice.hide();
       if (result.skipped) {
         new import_obsidian4.Notice("\u8FD9\u7BC7\u767E\u5EA6 AI \u7B14\u8BB0\u5DF2\u5B58\u5728\uFF0C\u5DF2\u6253\u5F00\u672C\u5730\u7B14\u8BB0\uFF0C\u672A\u91CD\u590D\u722C\u53D6");
@@ -1575,6 +1671,8 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       new import_obsidian4.Notice("\u6CA1\u6709\u627E\u5230\u5DF2\u6253\u5F00\u7684\u767E\u5EA6 FCB AI \u7B14\u8BB0");
       return;
     }
+    const notesFolder = await this.selectImportFolder();
+    if (notesFolder === null) return;
     const notice = new import_obsidian4.Notice(`\u51C6\u5907\u6279\u91CF\u5BFC\u5165 ${webviews.length} \u7BC7\u767E\u5EA6 AI \u7B14\u8BB0\u2026`, 0);
     let imported = 0;
     let skipped = 0;
@@ -1592,7 +1690,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       }
       seen.add(identity);
       try {
-        const result = await this.importWebview(webview, notice, false);
+        const result = await this.importWebview(webview, notice, false, notesFolder);
         if (result.skipped) skipped += 1;
         else imported += 1;
       } catch (error) {
@@ -1604,7 +1702,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
     const summary = `\u6279\u91CF\u5BFC\u5165\u5B8C\u6210\uFF1A\u6210\u529F ${imported}\uFF0C\u8DF3\u8FC7 ${skipped}\uFF0C\u5931\u8D25 ${failed}`;
     new import_obsidian4.Notice(summary, failed > 0 ? 1e4 : 6e3);
   }
-  async importWebview(webview, notice, keepVideoAfterImport) {
+  async importWebview(webview, notice, keepVideoAfterImport, notesFolder) {
     var _a, _b;
     let temporaryVideoViews = [];
     const currentUrl = safeWebviewUrl(webview);
@@ -1636,11 +1734,11 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       vault: this.app.vault,
       html: snapshot.html,
       noteTitle: snapshot.title,
-      attachmentsFolder: this.settings.attachmentsFolder,
+      attachmentsFolder: noteAttachmentsFolder(notesFolder),
       downloadImages: this.settings.downloadImages,
       videoUrl
     });
-    const path = await this.createNotePath(snapshot.title);
+    const path = await this.createNotePath(snapshot.title, notesFolder);
     const content = this.composeNote(snapshot.title, snapshot.url, videoUrl, markdown);
     const file = await this.app.vault.create(path, content);
     await this.openFileReplacingWebview(webview, file);
@@ -1680,7 +1778,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
         vault: this.app.vault,
         html: snapshot.html,
         noteTitle: snapshot.title,
-        attachmentsFolder: this.settings.attachmentsFolder,
+        attachmentsFolder: noteAttachmentsFolder(file.path.includes("/") ? file.path.slice(0, file.path.lastIndexOf("/")) : ""),
         downloadImages: this.settings.downloadImages,
         videoUrl
       });
@@ -1858,8 +1956,8 @@ ${markdown}
 ${END_MARKER}
 `;
   }
-  async createNotePath(title) {
-    const folder = (0, import_obsidian4.normalizePath)(this.settings.notesFolder.trim().replace(/^[/\\]+|[/\\]+$/g, ""));
+  async createNotePath(title, notesFolder = this.settings.notesFolder) {
+    const folder = validateNotesFolder(this.app, notesFolder);
     if (folder) await ensureFolder2(this, folder);
     const stem = sanitizeFileName(title);
     let path = (0, import_obsidian4.normalizePath)(folder ? `${folder}/${stem}.md` : `${stem}.md`);

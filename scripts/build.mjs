@@ -11,6 +11,7 @@ const parts = [
   'vendor/turndown-plugin-gfm.js',
   'src/converter.js',
   'src/editor-timestamps.js',
+  'src/folder-picker.js',
   'src/settings.js',
   'src/defaults.js',
   'src/webview.js',

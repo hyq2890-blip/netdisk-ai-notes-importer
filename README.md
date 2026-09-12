@@ -2,6 +2,28 @@
 
 Import Baidu Netdisk AI video notes into Obsidian as local Markdown, with batch import, clickable original-video timestamps, image downloads, and incremental sync. Imported notes can also be used in a Media Extended video-note workflow. Media Extended is optional; no internal API integration is required.
 
+## 0.8.1 — Folder selection / 保存文件夹选择
+
+## 新增功能
+
+- 新增爬取前询问保存文件夹的功能，可选择已有文件夹，也可新建文件夹。
+- 关闭“导入前询问保存文件夹”后，可选择固定文件夹，笔记将直接保存到该目录。
+- 批量导入前仅询问一次，整批笔记保存到同一个文件夹。
+- 下载的图片自动保存到笔记所在文件夹的 `attachments` 子目录。
+- 简化保存位置设置，移除重复的目录选项。
+
+升级时保留 `data.json`。已有笔记和图片不会自动移动，原有图片链接保持不变。
+
+## What's new
+
+- Choose an existing folder or create a new one before capturing AI notes.
+- Turn off the folder prompt to save notes directly to a fixed folder configured in settings.
+- Batch import asks once and uses the selected destination for the entire batch.
+- Downloaded images follow notes into the destination folder's `attachments` subfolder.
+- Simplified storage settings by removing duplicate folder options.
+
+Keep `data.json` when upgrading. Existing notes and images are not moved, and existing image links are preserved.
+
 ## Installation
 
 Currently confirmed on Windows desktop only. Enable the core **Web Viewer** plugin in Obsidian. The plugin interface is currently in Chinese.
@@ -14,8 +36,8 @@ Currently confirmed on Windows desktop only. Enable the core **Web Viewer** plug
 ## Usage
 
 1. Open an existing Baidu Netdisk online AI note in Obsidian's Web Viewer and wait for its contents to load. You need access to the note and its original video; sign in to Baidu Netdisk when prompted.
-2. Click the left ribbon button **导入或同步百度 AI 笔记** to import a note. If a managed local note is active, this button synchronizes it instead.
-3. To batch import, open several AI note tabs and click **批量导入所有已打开的百度 AI 笔记**. Previously imported notes are skipped.
+2. Click the left ribbon button **导入或同步百度 AI 笔记** and choose an existing folder or enter a new folder path before capture. Disable the folder prompt in settings to use a fixed destination. Downloaded images are saved in the destination folder’s `attachments` subfolder. If a managed local note is active, this button synchronizes it instead.
+3. To batch import, open several AI note tabs and click **批量导入所有已打开的百度 AI 笔记**. Choose the destination once for the entire batch. Previously imported notes are skipped.
 4. Click a timestamp in the imported Markdown to open or seek the original video. The AI note page does not need to stay open. Playback still depends on the source link, permissions, and browser session.
 5. Continue editing the Markdown directly, or use Media Extended for your video-note workflow. Incremental sync keeps existing sections and adds new heading sections; replacement sync overwrites the plugin-managed region.
 
@@ -54,7 +76,8 @@ Media Extended 不是必需依赖。只有在你希望继续使用 Media Extende
 1. 在 Obsidian 的网页浏览器中打开百度网盘在线 AI 笔记。通常可以从百度网盘的 AI 笔记文件夹进入该页面。
 2. 等待页面中的笔记正文加载完成。
 3. 点击 Obsidian 左侧功能区的“导入或同步百度 AI 笔记”按钮。
-4. 插件会读取当前页面，将内容转换为 Markdown，并保存到设置中指定的目录。
+4. 爬取前选择已有文件夹或输入新路径创建文件夹，插件会将 Markdown 保存到所选目录。下载的图片自动保存在该目录的 `attachments` 子目录。
+5. 如果已在设置中关闭“导入前询问保存文件夹”，插件会直接使用固定保存文件夹。
 
 如果当前激活的是一篇已经由本插件管理的本地笔记，同一个按钮会执行同步，而不是重复导入。
 
@@ -62,7 +85,8 @@ Media Extended 不是必需依赖。只有在你希望继续使用 Media Extende
 
 1. 在 Obsidian 网页浏览器中分别打开多篇百度网盘 AI 笔记，使这些页面同时保持为已打开状态。
 2. 点击左侧功能区的“批量导入所有已打开的百度 AI 笔记”按钮。
-3. 插件会逐篇处理，并在完成后显示成功、跳过和失败的数量。
+3. 开启询问时，批量导入前只选择一次保存文件夹；整批笔记使用同一目录。关闭询问时直接使用固定文件夹。
+4. 插件会逐篇处理，并在完成后显示成功、跳过和失败的数量。
 
 同一篇在线笔记已经导入时，插件会根据页面标识查找本地文件并跳过重复创建。
 
@@ -102,8 +126,9 @@ Media Extended 不是必需依赖。只有在你希望继续使用 Media Extende
 
 ## 设置
 
-- Markdown 保存目录
-- 图片附件目录
+- 导入前询问保存文件夹：默认开启，单篇或批量导入前选择一次；取消后不爬取笔记
+- 固定保存文件夹：仅关闭询问后显示，支持选择已有目录或新建目录
+- 图片随笔记保存：自动使用笔记所在目录的 `attachments` 子目录，无需单独设置
 - 是否自动下载图片
 - 同步策略：增量同步或覆盖管理区域
 - 导入后是否打开原视频

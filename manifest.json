@@ -1,7 +1,7 @@
 {
   "id": "baidu-ai-notes",
   "name": "Netdisk AI Notes Importer",
-  "version": "0.7.2",
+  "version": "0.8.1",
   "minAppVersion": "1.8.0",
   "description": "Import Baidu Netdisk AI video notes as Markdown with batch import, original-video timestamps, image downloads, and local sync.",
   "author": "不要黑眼圈",

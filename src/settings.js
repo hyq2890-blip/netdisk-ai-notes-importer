@@ -8,15 +8,22 @@ var NetdiskAiNotesSettingTab = class extends import_obsidian2.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian2.Setting(containerEl).setName("AI \u7B14\u8BB0\u4FDD\u5B58\u76EE\u5F55").setHeading();
-    new import_obsidian2.Setting(containerEl).setName("Markdown \u4FDD\u5B58\u76EE\u5F55").setDesc("\u76F8\u5BF9\u4E8E Vault \u6839\u76EE\u5F55\uFF1B\u7559\u7A7A\u8868\u793A\u6839\u76EE\u5F55\u3002").addText((text) => text.setPlaceholder("Netdisk AI Notes Importer").setValue(this.plugin.settings.notesFolder).onChange(async (value) => {
-      this.plugin.settings.notesFolder = value.trim();
+    new import_obsidian2.Setting(containerEl).setName("保存位置").setHeading();
+    new import_obsidian2.Setting(containerEl).setName("导入前询问保存文件夹").setDesc("开启：每次导入选择文件夹，批量导入只选一次。关闭：始终使用固定文件夹。").addToggle(toggle => toggle.setValue(this.plugin.settings.askNotesFolder).onChange(async value => {
+      this.plugin.settings.askNotesFolder = value;
       await this.plugin.saveSettings();
+      this.display();
     }));
-    new import_obsidian2.Setting(containerEl).setName("\u56FE\u7247\u9644\u4EF6\u76EE\u5F55").setDesc("\u767E\u5EA6 AI \u7B14\u8BB0\u56FE\u7247\u4FDD\u5B58\u4F4D\u7F6E\uFF0C\u76F8\u5BF9\u4E8E Vault \u6839\u76EE\u5F55\u3002").addText((text) => text.setPlaceholder("Netdisk AI Notes Importer/attachments").setValue(this.plugin.settings.attachmentsFolder).onChange(async (value) => {
-      this.plugin.settings.attachmentsFolder = value.trim();
-      await this.plugin.saveSettings();
-    }));
+    if (!this.plugin.settings.askNotesFolder) {
+      new import_obsidian2.Setting(containerEl).setName("固定保存文件夹").setDesc(this.plugin.settings.notesFolder || "Vault 根目录").addButton(button => button.setButtonText("选择或新建文件夹").onClick(async () => {
+        const folder = await chooseNotesFolder(this.app, this.plugin.settings.notesFolder);
+        if (folder === null) return;
+        this.plugin.settings.notesFolder = folder;
+        await this.plugin.saveSettings();
+        this.display();
+      }));
+    }
+    new import_obsidian2.Setting(containerEl).setName("图片随笔记保存").setDesc("下载的图片自动保存到笔记所在文件夹的 attachments 子目录，无需单独设置。同步时使用笔记当前所在文件夹，已有图片和链接保持原样。");
     new import_obsidian2.Setting(containerEl).setName("\u81EA\u52A8\u4E0B\u8F7D\u56FE\u7247").setDesc("\u5173\u95ED\u65F6\u4FDD\u7559\u767E\u5EA6 CDN \u56FE\u7247\u5730\u5740\u3002").addToggle((toggle) => toggle.setValue(this.plugin.settings.downloadImages).onChange(async (value) => {
       this.plugin.settings.downloadImages = value;
       await this.plugin.saveSettings();
