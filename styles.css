@@ -22,7 +22,7 @@
   user-select: none;
 }
 
-.baidu-ai-note a[href*="pan.baidu.com/pfile/video"][href*="#t="] {
+.baidu-ai-note a[href*="pan.baidu.com/"][href*="#t="] {
   cursor: pointer;
   font-variant-numeric: tabular-nums;
 }
@@ -103,3 +103,20 @@
   line-height: 1.55;
   padding: 0.65em 0.75em;
 }
+.netdisk-inline-import {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+.netdisk-inline-import[hidden] { display: none; }
+.netdisk-inline-info { flex: 1 1 220px; min-width: 0; }
+.netdisk-inline-title { font-size: var(--font-ui-small); font-weight: var(--font-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.netdisk-inline-status { font-size: var(--font-ui-small); color: var(--text-muted); overflow-wrap: anywhere; line-height: 1.5; }
+.netdisk-inline-actions { display: flex; flex-wrap: wrap; gap: var(--size-4-2); }
+.netdisk-inline-actions button[hidden] { display: none; }

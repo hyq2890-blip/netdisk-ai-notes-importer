@@ -6,11 +6,14 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
     this.observedWebviews = /* @__PURE__ */ new WeakSet();
-    this.mostRecentFcbUrl = "";
+    this.inlineImportBars = new Map();
   }
   async onload() {
     await this.loadSettings();
+    this.addCommand({id: "bind-original-video", name: "补充或更换原视频", checkCallback: checking => {const file = this.getActiveManagedFile(); if (file && !checking) this.showVideoBinding(file); return Boolean(file);}});
     this.addSettingTab(new NetdiskAiNotesSettingTab(this.app, this));
+    this.addRibbonIcon("compass", "开始导入百度 AI 笔记", () => this.showImportGuide());
+    this.addCommand({id: "start-baidu-import", name: "开始导入百度 AI 笔记", callback: () => this.showImportGuide()});
     this.registerEditorExtension(createTimestampEditorExtension((seconds) => {
       const file = this.app.workspace.getActiveFile();
       if (file) void this.seekFromNote(file.path, seconds);
@@ -47,7 +50,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       checkCallback: (checking) => {
         var _a;
         const url = (_a = this.getActiveFrontmatter()) == null ? void 0 : _a.video_url;
-        const available = typeof url === "string" && isVideoUrl(url);
+        const available = typeof url === "string" && isPlaybackUrl(url);
         if (available && !checking) void this.openVideo(url);
         return available;
       }
@@ -76,7 +79,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       });
       if ((sourceFm == null ? void 0 : sourceFm.source) === "baidu-ai-note") {
         const videoLinks = element.querySelectorAll(
-          'a[href*="pan.baidu.com/pfile/video"][href*="#t="]'
+          'a[href*="pan.baidu.com/"][href*="#t="]'
         );
         videoLinks.forEach((link) => {
           const seconds = secondsFromVideoHref(link.href);
@@ -91,6 +94,95 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       }
     });
     this.startWebviewTracking();
+  }
+  showImportGuide() {
+    focusImportWorkspace(this.app);
+    const modal = new import_obsidian4.Modal(this.app);
+    modal.titleEl.setText("导入百度 AI 笔记");
+    modal.contentEl.createEl("p", {text: "① 开启核心插件“网页浏览器”。② 打开网盘并登录，打开 AI 笔记正文；只勾选文件不够。③ 点击导入，完成后会打开本地笔记。"});
+    new import_obsidian4.Setting(modal.contentEl).setName("打开百度网盘").addButton(b => b.setButtonText("打开或切回网盘").onClick(async () => {
+      modal.close();
+      try { await this.openNetdiskEntry(); } catch (error) { new import_obsidian4.Notice(messageOf(error)); }
+    }));
+    const status = modal.contentEl.createEl("p", {text: "正在检查当前页面…"});
+    let selected;
+    let selectedUrl;
+    let button;
+    new import_obsidian4.Setting(modal.contentEl).addButton(b => {
+      button = b;
+      b.setButtonText("导入这篇笔记").setCta().setDisabled(true).onClick(() => {modal.close(); void this.importCurrentNote(selected, selectedUrl);});
+    });
+    try {
+      selected = findFcbWebview(undefined, this.app);
+      if (!selected) status.setText("尚未打开 AI 笔记正文。请先打开笔记文件，再打开此向导。");
+      else extractFcbSnapshot(selected).then(snapshot => {
+        selectedUrl = snapshot.url;
+        status.setText(`已识别：${snapshot.title}。现在可以导入。`);
+        button.setDisabled(false);
+      }).catch(() => status.setText("笔记正文尚未加载完成。请等待正文显示后重新打开向导。"));
+    } catch (error) {status.setText(messageOf(error));}
+    modal.open();
+  }
+  async openNetdiskEntry() {
+    const leaf = await openNetdiskEntry(this.app);
+    new import_obsidian4.Notice("已切到中央的百度网盘页面。请打开要导入的 AI 笔记正文。", 6e3);
+    return leaf;
+  }
+  showImportResult(result) {
+    const modal = new import_obsidian4.Modal(this.app);
+    modal.titleEl.setText(result.skipped ? "这篇笔记已经导入" : "笔记已导入成功");
+    modal.contentEl.createEl("p", {text: `本地笔记：${result.file.path}`});
+    const message = modal.contentEl.createEl("p", {text: result.videoUrl ? "原视频已关联，可点击笔记时间点跳转。" : "正文已保存，视频暂未就绪。先重新识别一次，仍未找到时再按步骤手动补充，也可以稍后处理。"});
+    new import_obsidian4.Setting(modal.contentEl).addButton(b => b.setButtonText("查看本地笔记").setCta().onClick(async () => {modal.close(); await this.openFileReplacingWebview(null, result.file);}));
+    if (!result.videoUrl) {
+      let manual;
+      new import_obsidian4.Setting(modal.contentEl)
+        .addButton(b => b.setButtonText("重新识别视频").onClick(async () => {
+          b.setDisabled(true).setButtonText("正在识别…");
+          message.setText("正在重新识别对应笔记页的视频，请稍候…");
+          try {
+            const url = this.app.metadataCache.getFileCache(result.file)?.frontmatter?.fcb_url;
+            const view = getWebviews().find(view => isEmbeddedVideoUrl(safeWebviewUrl(view)) && sameUrl(safeWebviewUrl(view), url));
+            result.videoUrl = await this.retryVideoAssociation(result.file, view);
+            message.setText(result.videoUrl ? "视频已关联，可以点击本地笔记的时间点回看。" : "仍未识别到视频。可等待网页加载后重试，或点“手动补充”查看步骤。");
+            b.buttonEl.hidden = Boolean(result.videoUrl);
+            manual.buttonEl.hidden = Boolean(result.videoUrl);
+          } catch (error) {message.setText(`重新识别未完成：${messageOf(error)}。也可以手动补充。`); manual.buttonEl.hidden = false;}
+          finally {b.setDisabled(false).setButtonText("重新识别视频");}
+        }))
+        .addButton(b => {manual = b; b.setButtonText("手动补充").onClick(() => {modal.close(); this.showVideoBinding(result.file);}); b.buttonEl.hidden = true;})
+        .addButton(b => b.setButtonText("稍后处理").onClick(() => modal.close()));
+    }
+    modal.open();
+  }
+  showVideoBinding(file, options = {}) {
+    const modal = new import_obsidian4.Modal(this.app);
+    modal.titleEl.setText("手动补充原视频");
+    modal.contentEl.createEl("p", {text: "正文已经保存。这里补充视频页面地址，用于点击时间点回看，保存后不会自动播放。"});
+    const steps = modal.contentEl.createEl("ol");
+    steps.createEl("li", {text: "这篇网盘笔记左侧能看到视频？直接点下方“填入这篇笔记页地址”，不用再复制。"});
+    steps.createEl("li", {text: "如果笔记页没有视频，请在百度网盘找到对应课程的视频，打开播放页，复制顶部地址栏中的完整网址。"});
+    steps.createEl("li", {text: "把网址粘贴到下方，点击“保存关联”。还没找到地址时可先点“暂不补充”，找到后再回来。"});
+    let value = "";
+    let input;
+    new import_obsidian4.Setting(modal.contentEl).setName("视频页面地址").addText(t => {input = t; t.setPlaceholder("粘贴网盘视频页或带视频的笔记页地址").onChange(v => value = v.trim());});
+    const sourceUrl = this.app.metadataCache.getFileCache(file)?.frontmatter?.fcb_url;
+    if (isEmbeddedVideoUrl(sourceUrl)) new import_obsidian4.Setting(modal.contentEl).addButton(b => b.setButtonText("填入这篇笔记页地址").onClick(() => {value = sourceUrl; input.setValue(value);}));
+    const status = modal.contentEl.createEl("p");
+    new import_obsidian4.Setting(modal.contentEl).addButton(b => b.setButtonText("保存关联").setCta().onClick(async () => {
+      if (!isPlaybackUrl(value)) {status.setText("请填写视频播放页或带视频的 AI 笔记页地址，不能使用文件列表或分享页地址。"); return;}
+      b.setDisabled(true);
+      try {
+        await this.app.fileManager.processFrontMatter(file, fm => {fm.video_url = value;});
+        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        if (fm?.fcb_url) this.rememberVideoUrl(fm.fcb_url, value);
+        modal.close();
+        if (options.reveal !== false) await this.openFileReplacingWebview(null, file);
+        options.onSaved?.(value);
+        new import_obsidian4.Notice("原视频已关联，可以点击笔记时间点跳转。");
+      } catch (error) {status.setText(`保存失败：${messageOf(error)}`); b.setDisabled(false);}
+    })).addButton(b => b.setButtonText("暂不补充").onClick(() => modal.close()));
+    modal.open();
   }
   onunload() {
     var _a;
@@ -127,23 +219,22 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       return null;
     }
   }
-  async importCurrentNote() {
-    const webview = findFcbWebview();
+  async importCurrentNote(selectedWebview, selectedUrl) {
+    let webview;
+    try { webview = selectedWebview || findFcbWebview(undefined, this.app); } catch (error) { new import_obsidian4.Notice(messageOf(error)); return; }
     if (!webview) {
       new import_obsidian4.Notice("\u672A\u627E\u5230\u5DF2\u6253\u5F00\u7684\u767E\u5EA6 FCB AI \u7B14\u8BB0\u3002\u8BF7\u5148\u5728 Obsidian Web Viewer \u4E2D\u6253\u5F00\u7B14\u8BB0\u3002");
       return;
     }
+    const expectedUrl = selectedUrl || safeWebviewUrl(webview);
+    try { await webview.executeJavaScript("document.querySelectorAll('video,audio').forEach(media => media.pause())", true); } catch (_) {}
     const notesFolder = await this.selectImportFolder();
     if (notesFolder === null) return;
     const notice = new import_obsidian4.Notice("\u6B63\u5728\u5BFC\u5165\u767E\u5EA6 AI \u7B14\u8BB0\u2026", 0);
     try {
-      const result = await this.importWebview(webview, notice, this.settings.openVideoAfterImport, notesFolder);
+      const result = await this.importWebview(webview, notice, notesFolder, {expectedUrl});
       notice.hide();
-      if (result.skipped) {
-        new import_obsidian4.Notice("\u8FD9\u7BC7\u767E\u5EA6 AI \u7B14\u8BB0\u5DF2\u5B58\u5728\uFF0C\u5DF2\u6253\u5F00\u672C\u5730\u7B14\u8BB0\uFF0C\u672A\u91CD\u590D\u722C\u53D6");
-      } else {
-        new import_obsidian4.Notice(result.videoUrl ? "\u767E\u5EA6 AI \u7B14\u8BB0\u5BFC\u5165\u5B8C\u6210" : "\u5BFC\u5165\u5B8C\u6210\uFF1B\u6682\u672A\u81EA\u52A8\u8BC6\u522B\u5927\u89C6\u9891\u5730\u5740");
-      }
+      this.showImportResult(result);
     } catch (error) {
       notice.hide();
       console.error("Netdisk AI Notes Importer import failed", error);
@@ -152,6 +243,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
   }
   async importAllOpenNotes() {
     const webviews = getWebviews().filter((view) => isFcbUrl(safeWebviewUrl(view)));
+    const entries = webviews.map(webview => ({webview, url: safeWebviewUrl(webview)}));
     if (webviews.length === 0) {
       new import_obsidian4.Notice("\u6CA1\u6709\u627E\u5230\u5DF2\u6253\u5F00\u7684\u767E\u5EA6 FCB AI \u7B14\u8BB0");
       return;
@@ -164,8 +256,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
     let failed = 0;
     const seen = /* @__PURE__ */ new Set();
     for (let index = 0; index < webviews.length; index += 1) {
-      const webview = webviews[index];
-      const url = safeWebviewUrl(webview);
+      const {webview, url} = entries[index];
       const identity = getFcbIdentity(url);
       notice.setMessage(`\u6B63\u5728\u5904\u7406\u7B2C ${index + 1}/${webviews.length} \u7BC7\u2026`);
       if (!url || seen.has(identity)) {
@@ -175,7 +266,7 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       }
       seen.add(identity);
       try {
-        const result = await this.importWebview(webview, notice, false, notesFolder);
+        const result = await this.importWebview(webview, notice, notesFolder, {expectedUrl: url});
         if (result.skipped) skipped += 1;
         else imported += 1;
       } catch (error) {
@@ -187,34 +278,40 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
     const summary = `\u6279\u91CF\u5BFC\u5165\u5B8C\u6210\uFF1A\u6210\u529F ${imported}\uFF0C\u8DF3\u8FC7 ${skipped}\uFF0C\u5931\u8D25 ${failed}`;
     new import_obsidian4.Notice(summary, failed > 0 ? 1e4 : 6e3);
   }
-  async importWebview(webview, notice, keepVideoAfterImport, notesFolder) {
+  async importWebview(webview, notice, notesFolder, options = {}) {
     var _a, _b;
-    let temporaryVideoViews = [];
     const currentUrl = safeWebviewUrl(webview);
+    const checkPage = () => {
+      if (options.expectedUrl && !sameUrl(safeWebviewUrl(webview), options.expectedUrl)) throw new Error("页面已切换，请在目标笔记页面重新导入");
+    };
+    checkPage();
     const existingBeforeCapture = currentUrl ? this.findImportedFile(currentUrl) : null;
     if (existingBeforeCapture) {
-      await this.openFileReplacingWebview(webview, existingBeforeCapture);
+      if (options.reveal !== false) await this.openFileReplacingWebview(webview, existingBeforeCapture);
       const fm = (_a = this.app.metadataCache.getFileCache(existingBeforeCapture)) == null ? void 0 : _a.frontmatter;
-      const existingVideoUrl = typeof (fm == null ? void 0 : fm.video_url) === "string" ? fm.video_url : "";
+      let existingVideoUrl = typeof (fm == null ? void 0 : fm.video_url) === "string" ? fm.video_url : "";
+      if (!existingVideoUrl) {
+        try {
+          const snapshot = await extractFcbSnapshot(webview);
+          checkPage();
+          existingVideoUrl = await this.associateEmbeddedVideo(existingBeforeCapture, webview, snapshot);
+        } catch (_) { /* Existing notes remain usable if the page is not ready. */ }
+      }
       return { file: existingBeforeCapture, videoUrl: existingVideoUrl, skipped: true };
     }
     const snapshot = await extractFcbSnapshot(webview);
+    checkPage();
+    if (options.expectedUrl && !sameUrl(snapshot.url, options.expectedUrl)) throw new Error("笔记已切换，请重新导入");
+    notice.setMessage("已识别笔记：" + snapshot.title + "，正在保存正文和图片…");
     const existingAfterCapture = this.findImportedFile(snapshot.url);
     if (existingAfterCapture) {
-      await this.openFileReplacingWebview(webview, existingAfterCapture);
+      if (options.reveal !== false) await this.openFileReplacingWebview(webview, existingAfterCapture);
       const fm = (_b = this.app.metadataCache.getFileCache(existingAfterCapture)) == null ? void 0 : _b.frontmatter;
       const existingVideoUrl = typeof (fm == null ? void 0 : fm.video_url) === "string" ? fm.video_url : "";
       return { file: existingAfterCapture, videoUrl: existingVideoUrl, skipped: true };
     }
-    this.mostRecentFcbUrl = snapshot.url;
-    let videoUrl = this.resolveVideoUrl(snapshot.url, snapshot.videoUrlCandidates);
-    if (!videoUrl) {
-      notice.setMessage("\u6B63\u5728\u81EA\u52A8\u83B7\u53D6\u767E\u5EA6\u5927\u89C6\u9891\u5730\u5740\u2026");
-      const beforeAutoOpen = new Set(getWebviews());
-      const openedUrl = await autoOpenLargeVideo(webview);
-      temporaryVideoViews = this.findTemporaryVideoViews(beforeAutoOpen, webview);
-      videoUrl = this.resolveVideoUrl(snapshot.url, openedUrl ? [openedUrl] : []);
-    }
+    const videoUrl = snapshotPlaybackUrl(snapshot);
+
     const markdown = await convertHtmlToMarkdown({
       vault: this.app.vault,
       html: snapshot.html,
@@ -225,13 +322,9 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
     });
     const path = await this.createNotePath(snapshot.title, notesFolder);
     const content = this.composeNote(snapshot.title, snapshot.url, videoUrl, markdown);
+    checkPage();
     const file = await this.app.vault.create(path, content);
-    await this.openFileReplacingWebview(webview, file);
-    if (keepVideoAfterImport) {
-      if (videoUrl) await this.openVideo(videoUrl);
-    } else {
-      this.closeWebviewLeaves(temporaryVideoViews);
-    }
+    if (options.reveal !== false) await this.openFileReplacingWebview(webview, file);
     return { file, videoUrl, skipped: false };
   }
   async syncCurrentNote() {
@@ -243,7 +336,6 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
       return;
     }
     const notice = new import_obsidian4.Notice("\u6B63\u5728\u540C\u6B65\u767E\u5EA6 AI \u7B14\u8BB0\u2026", 0);
-    let temporaryVideoViews = [];
     try {
       let webview = findFcbWebview(fcbUrl);
       if (!webview) {
@@ -251,14 +343,10 @@ var NetdiskAiNotesPlugin = class extends import_obsidian4.Plugin {
         webview = await waitForWebview((view) => isFcbUrl(safeWebviewUrl(view)) && sameUrl(safeWebviewUrl(view), fcbUrl));
       }
       const snapshot = await extractFcbSnapshot(webview);
-      let videoUrl = this.resolveVideoUrl(fcbUrl, snapshot.videoUrlCandidates);
-      if (!videoUrl) {
-        notice.setMessage("\u6B63\u5728\u81EA\u52A8\u83B7\u53D6\u767E\u5EA6\u5927\u89C6\u9891\u5730\u5740\u2026");
-        const beforeAutoOpen = new Set(getWebviews());
-        const openedUrl = await autoOpenLargeVideo(webview);
-        temporaryVideoViews = this.findTemporaryVideoViews(beforeAutoOpen, webview);
-        videoUrl = this.resolveVideoUrl(fcbUrl, openedUrl ? [openedUrl] : []);
-      }
+      const checkPage = () => {if (!sameUrl(safeWebviewUrl(webview), fcbUrl) || !sameUrl(snapshot.url, fcbUrl)) throw new Error("笔记页面已切换，已停止同步");};
+      checkPage();
+      const videoUrl = isPlaybackUrl(frontmatter.video_url) ? frontmatter.video_url : snapshotPlaybackUrl(snapshot);
+
       const markdown = await convertHtmlToMarkdown({
         vault: this.app.vault,
         html: snapshot.html,
@@ -285,6 +373,7 @@ ${END_MARKER}`;
       const legacyTitle = file.basename.endsWith(".fcb") || file.basename === "\u767E\u5EA6\u7F51\u76D8\u5728\u7EBF\u6587\u6863";
       const baseContent = legacyTitle ? oldContent.replace(/^#\s+[^\n]+$/m, `# ${snapshot.title}`) : oldContent;
       const newContent = replaceManagedSection(baseContent, replacement);
+      checkPage();
       await this.app.vault.modify(file, newContent);
       await this.app.fileManager.processFrontMatter(file, (fm) => {
         if (videoUrl) fm.video_url = videoUrl;
@@ -295,7 +384,7 @@ ${END_MARKER}`;
         fm.cssclasses = classes;
       });
       await this.renameLegacyManagedFile(file, snapshot.title);
-      if (!this.settings.openVideoAfterImport) this.closeWebviewLeaves(temporaryVideoViews);
+      await this.openFileReplacingWebview(webview, file);
       notice.hide();
       if (this.settings.syncMode === "incremental") {
         new import_obsidian4.Notice(`\u589E\u91CF\u540C\u6B65\u5B8C\u6210\uFF1A\u65B0\u589E ${addedSections} \u4E2A\u7AE0\u8282\u5757\uFF1B\u5DF2\u6709\u5185\u5BB9\u53CA\u4FEE\u6539\u5DF2\u4FDD\u7559`);
@@ -313,56 +402,84 @@ ${END_MARKER}`;
     const file = this.app.vault.getAbstractFileByPath(sourcePath);
     const frontmatter = file instanceof import_obsidian4.TFile ? (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter : void 0;
     const videoUrl = typeof (frontmatter == null ? void 0 : frontmatter.video_url) === "string" ? frontmatter.video_url : "";
-    if (!videoUrl || !isVideoUrl(videoUrl)) {
+    if (!videoUrl || !isPlaybackUrl(videoUrl)) {
       new import_obsidian4.Notice("\u8FD9\u7BC7\u7B14\u8BB0\u8FD8\u6CA1\u6709\u53EF\u7528\u7684\u89C6\u9891\u5730\u5740\u3002\u8BF7\u91CD\u65B0\u5BFC\u5165\u6216\u540C\u6B65\uFF0C\u63D2\u4EF6\u4F1A\u5C1D\u8BD5\u81EA\u52A8\u83B7\u53D6\u3002");
       return;
     }
     try {
-      if (!findVideoWebview(videoUrl)) await openInWebViewer(this.app, videoUrl, this.settings.videoOpenPosition);
+      if (!findVideoWebview(videoUrl)) await openInWebViewer(this.app, videoUrl, isEmbeddedVideoUrl(videoUrl) ? "tab" : this.settings.videoOpenPosition);
       let activeVideo;
       try {
         activeVideo = await waitAndSeek(videoUrl, seconds);
       } catch (firstError) {
+        if (isEmbeddedVideoUrl(videoUrl)) throw new Error("当前笔记页的视频尚未就绪，请确认已登录并等待视频加载后重试");
         console.debug("Netdisk AI Notes Importer: rebuilding stale video Web Viewer", firstError);
         await openInWebViewer(this.app, videoUrl, this.settings.videoOpenPosition);
         activeVideo = await waitAndSeek(videoUrl, seconds);
       }
       const videoLeaf = this.findLeafForWebview(activeVideo);
-      if (videoLeaf) this.app.workspace.revealLeaf(videoLeaf);
+      if (videoLeaf) {
+        await this.app.workspace.revealLeaf(videoLeaf);
+        this.app.workspace.setActiveLeaf(videoLeaf, {focus: true});
+      }
     } catch (error) {
       console.error("Netdisk AI Notes Importer seek failed", error);
       new import_obsidian4.Notice(`\u89C6\u9891\u8DF3\u8F6C\u5931\u8D25\uFF1A${messageOf(error)}`, 8e3);
     }
   }
   async openVideo(url) {
-    if (!isVideoUrl(url)) {
+    if (!isPlaybackUrl(url)) {
       new import_obsidian4.Notice("\u5F53\u524D\u7B14\u8BB0\u6CA1\u6709\u6709\u6548\u7684\u767E\u5EA6\u5927\u89C6\u9891\u5730\u5740");
       return;
     }
     const existing = findVideoWebview(url);
-    if (!existing) await openInWebViewer(this.app, url, this.settings.videoOpenPosition);
-  }
-  resolveVideoUrl(fcbUrl, candidates) {
-    var _a;
-    const validCandidate = candidates.find(isVideoUrl);
-    if (validCandidate) {
-      this.rememberVideoUrl(fcbUrl, validCandidate);
-      return validCandidate;
+    if (!existing) await openInWebViewer(this.app, url, isEmbeddedVideoUrl(url) ? "tab" : this.settings.videoOpenPosition);
+    else {
+      const leaf = this.findLeafForWebview(existing);
+      if (leaf) {await this.app.workspace.revealLeaf(leaf); this.app.workspace.setActiveLeaf(leaf, {focus: true});}
     }
-    const remembered = this.settings.videoByFcbUrl[fcbUrl];
-    if (remembered && isVideoUrl(remembered)) return remembered;
-    const openVideos = getWebviews().map(safeWebviewUrl).filter(isVideoUrl);
-    const fcbPath = getQueryPath2(fcbUrl);
-    return (_a = openVideos.find((url) => Boolean(fcbPath) && getQueryPath2(url) === fcbPath)) != null ? _a : openVideos.length === 1 ? openVideos[0] : "";
+  }
+  async associateEmbeddedVideo(file, webview, snapshot) {
+    if (!snapshot.hasEmbeddedVideo || !isEmbeddedVideoUrl(snapshot.url) || !sameUrl(safeWebviewUrl(webview), snapshot.url)) return "";
+    let linked = "";
+    await this.app.fileManager.processFrontMatter(file, fm => {
+      if (!sameUrl(safeWebviewUrl(webview), snapshot.url) || fm.source !== "baidu-ai-note" || !sameUrl(fm.fcb_url, snapshot.url)) throw new Error("笔记页面已切换，未更改原视频关联");
+      // An explicit existing association always wins over automatic detection.
+      if (!fm.video_url) fm.video_url = snapshot.url;
+      linked = fm.video_url;
+    });
+    return linked;
+  }
+  async retryVideoAssociation(file, webview) {
+    const expectedUrl = this.app.metadataCache.getFileCache(file)?.frontmatter?.fcb_url;
+    const checkPage = () => {
+      if (!isEmbeddedVideoUrl(expectedUrl) || !sameUrl(safeWebviewUrl(webview), expectedUrl)) throw new Error("请先打开这篇笔记的网盘正文页，再重新识别视频");
+    };
+    checkPage();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      checkPage();
+      const snapshot = await extractFcbSnapshot(webview);
+      checkPage();
+      if (!sameUrl(snapshot.url, expectedUrl)) throw new Error("笔记页面已切换，请在对应笔记页重试");
+      if (snapshot.hasEmbeddedVideo) return this.associateEmbeddedVideo(file, webview, snapshot);
+      if (attempt < 2) await delay(700);
+    }
+    return "";
   }
   rememberVideoUrl(fcbUrl, videoUrl) {
-    if (!isFcbUrl(fcbUrl) || !isVideoUrl(videoUrl)) return;
+    if (!isFcbUrl(fcbUrl) || !isPlaybackUrl(videoUrl)) return;
     if (this.settings.videoByFcbUrl[fcbUrl] === videoUrl) return;
     this.settings.videoByFcbUrl[fcbUrl] = videoUrl;
     void this.saveSettings();
   }
   startWebviewTracking() {
-    const attachAll = () => getWebviews().forEach((view) => this.attachWebview(view));
+    const attachAll = () => {
+      const views = getWebviews();
+      for (const [view, bar] of this.inlineImportBars) {
+        if (!views.includes(view)) {bar.destroy(); this.inlineImportBars.delete(view);}
+      }
+      views.forEach(view => this.attachWebview(view));
+    };
     attachAll();
     this.webviewObserver = new MutationObserver(attachAll);
     this.webviewObserver.observe(document.body, { childList: true, subtree: true });
@@ -370,29 +487,18 @@ ${END_MARKER}`;
       var _a;
       return (_a = this.webviewObserver) == null ? void 0 : _a.disconnect();
     });
+    this.register(() => {for (const bar of this.inlineImportBars.values()) bar.destroy(); this.inlineImportBars.clear();});
   }
   attachWebview(webview) {
     if (this.observedWebviews.has(webview)) return;
     this.observedWebviews.add(webview);
-    const rememberContext = () => {
-      const url = safeWebviewUrl(webview);
-      if (isFcbUrl(url)) this.mostRecentFcbUrl = url;
-      if (isVideoUrl(url) && this.mostRecentFcbUrl) this.rememberVideoUrl(this.mostRecentFcbUrl, url);
-    };
-    const captureEventUrl = (event) => {
-      var _a;
-      const url = (_a = event.url) != null ? _a : "";
-      if (isVideoUrl(url)) {
-        const source = isFcbUrl(safeWebviewUrl(webview)) ? safeWebviewUrl(webview) : this.mostRecentFcbUrl;
-        if (source) this.rememberVideoUrl(source, url);
-      }
-      window.setTimeout(rememberContext, 0);
-    };
-    ["did-navigate", "did-navigate-in-page", "new-window", "will-navigate"].forEach((name) => {
-      webview.addEventListener(name, captureEventUrl);
-      this.register(() => webview.removeEventListener(name, captureEventUrl));
-    });
-    rememberContext();
+    const bar = new InlineImportBar(this, webview);
+    this.inlineImportBars.set(webview, bar);
+    const refreshBar = () => void bar.refresh();
+    for (const name of ["dom-ready", "did-stop-loading", "did-navigate", "did-navigate-in-page"]) {
+      webview.addEventListener(name, refreshBar);
+      this.register(() => webview.removeEventListener(name, refreshBar));
+    }
   }
   getActiveManagedFile() {
     var _a;
@@ -454,8 +560,11 @@ ${END_MARKER}
     return path;
   }
   async openFileReplacingWebview(webview, file) {
-    const owner = this.findLeafForWebview(webview);
-    await (owner != null ? owner : this.app.workspace.getLeaf(false)).openFile(file);
+    let target;
+    this.app.workspace.iterateAllLeaves(leaf => {if (leaf.view?.file?.path === file.path) target = leaf;});
+    target = target || this.app.workspace.getLeaf("tab");
+    await target.openFile(file, {active: true});
+    this.app.workspace.revealLeaf(target);
   }
   findLeafForWebview(webview) {
     let owner = null;
@@ -464,20 +573,6 @@ ${END_MARKER}
       if (!owner && (container == null ? void 0 : container.contains(webview))) owner = leaf;
     });
     return owner;
-  }
-  findTemporaryVideoViews(before, source) {
-    return getWebviews().filter((view) => {
-      if (!isVideoUrl(safeWebviewUrl(view))) return false;
-      return view === source || !before.has(view);
-    });
-  }
-  closeWebviewLeaves(webviews) {
-    const leaves = /* @__PURE__ */ new Set();
-    webviews.forEach((view) => {
-      const leaf = this.findLeafForWebview(view);
-      if (leaf) leaves.add(leaf);
-    });
-    leaves.forEach((leaf) => leaf.detach());
   }
   async renameLegacyManagedFile(file, title) {
     var _a, _b;
@@ -559,7 +654,7 @@ function renderMarkdownSections(section) {
   return lines.join("\n");
 }
 function headingKey(heading) {
-  return heading.replace(/^#{2,6}\s+/, "").replace(/<span\b[^>]*class=["'][^"']*baidu-ai-timestamp[^"']*["'][^>]*>.*?<\/span>/gi, "").replace(/\[[^\]]+\]\([^)]*pan\.baidu\.com\/pfile\/video[^)]*#t=[^)]*\)/gi, "").replace(/[*_`~]/g, "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  return heading.replace(/^#{2,6}\s+/, "").replace(/<span\b[^>]*class=["'][^"']*baidu-ai-timestamp[^"']*["'][^>]*>.*?<\/span>/gi, "").replace(/\[[^\]]+\]\([^)]*pan\.baidu\.com\/(?:pfile\/video|fcb\/edit)[^)]*#t=[^)]*\)/gi, "").replace(/[*_`~]/g, "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }
 function yamlString(value) {
   return JSON.stringify(value);
@@ -595,7 +690,7 @@ function messageOf(error) {
 function secondsFromVideoHref(value) {
   try {
     const url = new URL(value);
-    if (url.hostname !== "pan.baidu.com" || !url.pathname.includes("/pfile/video")) return null;
+    if (!isPlaybackUrl(value)) return null;
     const raw = new URLSearchParams(url.hash.slice(1)).get("t");
     if (!raw) return null;
     const parts = raw.split(":").map(Number);

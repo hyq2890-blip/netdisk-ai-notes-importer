@@ -12,16 +12,25 @@ function safeWebviewUrl(webview) {
     return "";
   }
 }
-function findFcbWebview(url) {
+function findFcbWebview(url, app) {
   const candidates = getWebviews().filter((view) => safeWebviewUrl(view).includes(FCB_URL_PART));
-  if (!url) return candidates[0];
+  if (!url) {
+    const container = app?.workspace?.activeLeaf?.view?.containerEl;
+    const active = candidates.find(view => container?.contains(view));
+    if (active) return active;
+    if (candidates.length > 1) throw new Error("打开了多篇 AI 笔记，请先选中要导入的网页标签，再执行导入命令。");
+    return candidates[0];
+  }
   return candidates.find((view) => samePage(safeWebviewUrl(view), url));
 }
 function findVideoWebview(videoUrl) {
   return findVideoWebviews(videoUrl)[0];
 }
 function findVideoWebviews(videoUrl) {
-  const candidates = getWebviews().filter((view) => safeWebviewUrl(view).includes(VIDEO_URL_PART));
+  if (isEmbeddedVideoUrl(videoUrl)) {
+    return getWebviews().filter(view => isEmbeddedVideoUrl(safeWebviewUrl(view)) && sameUrl(safeWebviewUrl(view), videoUrl));
+  }
+  const candidates = getWebviews().filter((view) => isVideoUrl(safeWebviewUrl(view)));
   if (!videoUrl) return candidates;
   const exact = candidates.filter((view) => samePage(safeWebviewUrl(view), videoUrl));
   if (exact.length > 0) return exact;
@@ -96,128 +105,18 @@ async function extractFcbSnapshot(webview) {
     }
     if (!title) title = document.title.replace(/[-_|].*百度网盘.*$/i, '').trim() || '百度 AI 笔记';
 
-    const found = new Set();
-    const add = (raw) => {
-      if (!raw || typeof raw !== 'string') return;
-      let value = raw.replace(/\\\\\//g, '/').replace(/&amp;/g, '&');
-      try { value = decodeURIComponent(value); } catch (_) {}
-      if (value.startsWith('//')) value = location.protocol + value;
-      if (value.startsWith('/pfile/video')) value = location.origin + value;
-      if (value.includes('pan.baidu.com/pfile/video') && !value.startsWith('blob:')) found.add(value);
-    };
-    document.querySelectorAll('a[href], [data-url], [data-href]').forEach((el) => {
-      add(el.href); add(el.getAttribute('data-url')); add(el.getAttribute('data-href'));
-    });
-    Array.from(document.querySelectorAll('button, a, [role="button"]'))
-      .filter((el) => (el.textContent || '').includes('更多视频功能'))
-      .forEach((el) => {
-        const link = el.closest('a[href]');
-        if (link) add(link.href);
-        Array.from(el.attributes || []).forEach((attr) => add(attr.value));
-      });
-    performance.getEntriesByType('resource').forEach((entry) => add(entry.name));
-    const pageHtml = document.documentElement.innerHTML;
-    const matches = pageHtml.match(/https?:\\?\/\\?\/pan\\?\.baidu\\?\.com\\?\/pfile\\?\/video[^\"'<>\\s]*/g) || [];
-    matches.slice(0, 20).forEach(add);
-
-    return { url: location.href, title, html: clone.innerHTML, videoUrlCandidates: Array.from(found) };
+    const hasEmbeddedVideo = Array.from(document.querySelectorAll('video'))
+      .some(video => Number.isFinite(video.duration) && video.duration > 0 && video.readyState >= 1);
+    return { url: location.href, title, html: clone.innerHTML, videoUrlCandidates: [], hasEmbeddedVideo };
   })()`;
   return executeWithRetry(webview, code);
-}
-async function autoOpenLargeVideo(webview) {
-  const before = new Set(getWebviews().map(safeWebviewUrl).filter(isVideoUrl));
-  const more = await locateBaiduControl(webview, "more");
-  if (!more) return "";
-  if (isVideoUrl(more.url)) return more.url;
-  await sendWebviewClick(webview, more);
-  let discovered = await waitForNewVideoUrl(webview, before, 3500);
-  if (discovered) return discovered;
-  const largeVideo = await locateBaiduControl(webview, "large-video");
-  if (largeVideo) {
-    if (isVideoUrl(largeVideo.url)) return largeVideo.url;
-    await sendWebviewClick(webview, largeVideo);
-  }
-  discovered = await waitForNewVideoUrl(webview, before, 8500);
-  return discovered;
-}
-async function locateBaiduControl(webview, kind) {
-  const code = String.raw`(() => {
-    const kind = ${JSON.stringify(kind)};
-    const visible = (el) => {
-      const rect = el.getBoundingClientRect();
-      const style = getComputedStyle(el);
-      return rect.width > 3 && rect.height > 3 && style.display !== 'none' && style.visibility !== 'hidden';
-    };
-    const normalize = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim();
-    const matches = (text) => kind === 'more'
-      ? text.startsWith('更多视频功能') && text.length < 24
-      : !text.includes('更多视频功能') &&
-        (text === '大视频' || text.includes('大视频播放') || text.includes('打开大视频')) && text.length < 24;
-    const candidates = Array.from(document.querySelectorAll('body *'))
-      .filter((el) => visible(el) && matches(normalize(el)))
-      .sort((a, b) => {
-        const ar = a.getBoundingClientRect();
-        const br = b.getBoundingClientRect();
-        return (ar.width * ar.height) - (br.width * br.height);
-      });
-    const el = candidates[0];
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    const link = el.closest('a[href]');
-    return {
-      x: Math.round(rect.left + rect.width / 2),
-      y: Math.round(rect.top + rect.height / 2),
-      url: link ? link.href : ''
-    };
-  })()`;
-  try {
-    return await executeWithRetry(webview, code, 3, 250);
-  } catch (e) {
-    return null;
-  }
-}
-async function sendWebviewClick(webview, target) {
-  if (typeof webview.sendInputEvent === "function") {
-    try {
-      webview.focus();
-      await webview.sendInputEvent({ type: "mouseMove", x: target.x, y: target.y });
-      await webview.sendInputEvent({ type: "mouseDown", x: target.x, y: target.y, button: "left", clickCount: 1 });
-      await delay(45);
-      await webview.sendInputEvent({ type: "mouseUp", x: target.x, y: target.y, button: "left", clickCount: 1 });
-      return;
-    } catch (error) {
-      console.debug("Netdisk AI Notes Importer: trusted webview click failed, using DOM fallback", error);
-    }
-  }
-  const fallback = `(() => {
-    const el = document.elementFromPoint(${target.x}, ${target.y});
-    if (!el) return false;
-    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
-      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-    }
-    return true;
-  })()`;
-  await executeWithRetry(webview, fallback, 2, 200);
-}
-async function waitForNewVideoUrl(webview, before, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const urls = getWebviews().map(safeWebviewUrl).filter(isVideoUrl);
-    const newlyOpened = urls.find((url) => !before.has(url));
-    if (newlyOpened) return newlyOpened;
-    const navigatedCurrent = safeWebviewUrl(webview);
-    if (isVideoUrl(navigatedCurrent)) return navigatedCurrent;
-    await delay(300);
-  }
-  const remaining = getWebviews().map(safeWebviewUrl).filter(isVideoUrl);
-  if (remaining.length === 1) return remaining[0];
-  return "";
 }
 async function seekWebview(webview, seconds) {
   const code = `(() => {
     const v = Array.from(document.querySelectorAll("video"))
       .find(v => Number.isFinite(v.duration) && v.duration > 0 && v.readyState >= 1);
     if (!v) return false;
+    if (${JSON.stringify(isEmbeddedVideoUrl(safeWebviewUrl(webview)))}) v.pause();
     v.currentTime = ${JSON.stringify(seconds)};
     // Chromium may apply the seek asynchronously; successful assignment is enough.
     return true;
@@ -250,9 +149,54 @@ async function waitAndSeek(videoUrl, seconds) {
   }
   throw new Error(foundAny ? "\u89C6\u9891\u64AD\u653E\u5668\u5728\u8D85\u65F6\u524D\u672A\u51C6\u5907\u597D" : "\u672A\u627E\u5230\u5BF9\u5E94\u7684\u5927\u89C6\u9891 Web Viewer");
 }
+// The import entry belongs in the main workspace, never in a sidebar.
+// Reuse an existing page without reloading it or resetting its navigation.
+function focusImportWorkspace(app) {
+  // Settings can live in a separate window. Leaving it open would hide the
+  // activated main tab, and a guide created there would inherit that window.
+  if (app.setting?.modalEl?.isConnected) app.setting.close();
+  app.workspace.containerEl?.ownerDocument?.defaultView?.focus();
+}
+async function openNetdiskEntry(app) {
+  focusImportWorkspace(app);
+  const workspace = app.workspace;
+  const leaves = [];
+  workspace.iterateAllLeaves(leaf => { leaves.push(leaf); });
+  const isMain = leaf => leaf.getRoot() === workspace.rootSplit;
+  const isNetdisk = leaf => {
+    const saved = leaf.getViewState();
+    if (leaf.view.getViewType() !== "webviewer" && saved.type !== "webviewer") return false;
+    const webview = leaf.view.containerEl?.querySelector("webview");
+    const liveUrl = webview && safeWebviewUrl(webview);
+    // A restored tab can still be deferred or showing about:blank. Its saved
+    // destination is enough to select it without creating a duplicate tab.
+    const url = liveUrl && liveUrl !== "about:blank" ? liveUrl : saved.state?.url;
+    try { const parsed = new URL(url); return parsed.protocol === "https:" && parsed.hostname === "pan.baidu.com"; } catch (_) { return false; }
+  };
+  const active = workspace.activeLeaf;
+  const pages = leaves.filter(isNetdisk);
+  const existing = pages.find(leaf => leaf === active && isMain(leaf)) || pages.find(isMain) || pages[0];
+  if (existing && isMain(existing)) {
+    await workspace.revealLeaf(existing);
+    workspace.setActiveLeaf(existing, {focus: true});
+    workspace.rightSplit?.collapse();
+    return existing;
+  }
+  const empty = leaf => isMain(leaf) && leaf.view.getViewType() === "empty";
+  const target = leaves.find(leaf => leaf === active && empty(leaf)) || leaves.find(empty) || workspace.getLeaf("tab");
+  if (!isMain(target)) throw new Error("无法在中央打开网盘，请先选中中间的标签页后重试。");
+  const state = existing ? existing.getViewState() : {type: "webviewer", state: {url: "https://pan.baidu.com"}};
+  await target.setViewState({...state, active: true});
+  await workspace.revealLeaf(target);
+  workspace.setActiveLeaf(target, {focus: true});
+  // Close only the relocated sidebar page, after the central page is ready.
+  if (existing) existing.detach();
+  workspace.rightSplit?.collapse();
+  return target;
+}
 async function openInWebViewer(app, url, position) {
   var _a;
-  const leaf = position === "right" ? (_a = app.workspace.getRightLeaf(false)) != null ? _a : app.workspace.getLeaf("split", "vertical") : app.workspace.getLeaf(false);
+  const leaf = position === "tab" ? app.workspace.getLeaf("tab") : position === "right" ? (_a = app.workspace.getRightLeaf(false)) != null ? _a : app.workspace.getLeaf("split", "vertical") : app.workspace.getLeaf(false);
   try {
     await leaf.setViewState({ type: "webviewer", active: true, state: { url } });
     app.workspace.revealLeaf(leaf);
@@ -263,7 +207,17 @@ async function openInWebViewer(app, url, position) {
   }
 }
 function isVideoUrl(url) {
-  return url.includes(VIDEO_URL_PART) && !url.startsWith("blob:");
+  try { const parsed = new URL(url); return parsed.protocol === "https:" && parsed.hostname === "pan.baidu.com" && parsed.pathname === "/pfile/video"; } catch (_) { return false; }
+}
+function isEmbeddedVideoUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "pan.baidu.com" && url.pathname === "/fcb/edit" && Boolean(url.searchParams.get("path") || url.searchParams.get("fsid"));
+  } catch (_) { return false; }
+}
+function isPlaybackUrl(value) { return isVideoUrl(value) || isEmbeddedVideoUrl(value); }
+function snapshotPlaybackUrl(snapshot, fallback = "") {
+  return snapshot.hasEmbeddedVideo && isEmbeddedVideoUrl(snapshot.url) ? snapshot.url : fallback;
 }
 function isFcbUrl(url) {
   return url.includes(FCB_URL_PART);

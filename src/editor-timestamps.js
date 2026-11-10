@@ -71,7 +71,7 @@ function createTimestampEditorExtension(onSeek) {
       if (event.button !== 0) return false;
       const target = event.target;
       if (!(target instanceof Element)) return false;
-      const link = target.closest('a[href*="pan.baidu.com/pfile/video"][href*="#t="]');
+      const link = target.closest('a[href*="pan.baidu.com/"][href*="#t="]');
       if (!link) return false;
       const seconds = secondsFromHref(link.href);
       if (seconds === null) return false;
@@ -92,7 +92,7 @@ function decodeEntities(value) {
 function secondsFromHref(value) {
   try {
     const url = new URL(value);
-    if (url.hostname !== "pan.baidu.com" || !url.pathname.includes("/pfile/video")) return null;
+    if (!isPlaybackUrl(value)) return null;
     const raw = new URLSearchParams(url.hash.slice(1)).get("t");
     if (!raw) return null;
     const parts = raw.split(":").map(Number);
