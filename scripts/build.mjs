@@ -15,11 +15,13 @@ const parts = [
   'src/settings.js',
   'src/defaults.js',
   'src/webview.js',
+  'src/inline-import.js',
   'src/main.js',
 ];
 const chunks = await Promise.all(parts.map(path => readFile(join(root, path), 'utf8')));
 const license = await readFile(join(root, 'vendor/LICENSE'), 'utf8');
-const output = '/*! Bundled Turndown and turndown-plugin-gfm license:\n' + license.trimEnd() + '\n*/\n' + chunks.map(text => text.trimEnd() + '\n').join('\n');
+const projectLicense = await readFile(join(root, 'LICENSE'), 'utf8');
+const output = '/*! Netdisk AI Notes Importer license:\n' + projectLicense.trimEnd() + '\n*/\n' + '/*! Bundled Turndown and turndown-plugin-gfm license:\n' + license.trimEnd() + '\n*/\n' + chunks.map(text => text.trimEnd() + '\n').join('\n');
 new Script(output, { filename: 'main.js' });
 await writeFile(join(root, 'main.js'), output, 'utf8');
 console.log('Built main.js from src/ and vendor/.');

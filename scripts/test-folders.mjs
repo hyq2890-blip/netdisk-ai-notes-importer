@@ -53,7 +53,7 @@ let prompts = 0;
 plugin.selectImportFolder = async () => { prompts++; return '课程'; };
 context.getFcbIdentity = () => 'note';
 vm.runInContext('import_obsidian4.Notice = class {setMessage() {} hide() {}};', context);
-plugin.importWebview = async (_view, _notice, _keep, folder) => { assert.equal(folder, '课程'); return {skipped: false}; };
+plugin.importWebview = async (_view, _notice, folder) => { assert.equal(folder, '课程'); return {skipped: false}; };
 await plugin.importAllOpenNotes();
 assert.equal(prompts, 1);
 console.log('Passed: folder selection, root, nested creation, validation, fixed destination, cancellation before capture, batch destination.');
@@ -69,7 +69,7 @@ context.extractFcbSnapshot = async () => ({url: 'source', title: 'Lesson', html:
 let imageFolder;
 context.convertHtmlToMarkdown = async options => { imageFolder = options.attachmentsFolder; return ''; };
 for (const folder of ['课程/新课', '', '固定']) {
-  await plugin.importWebview({}, {}, false, folder);
+  await plugin.importWebview({}, {setMessage(){}}, folder);
   assert.equal(imageFolder, folder ? `${folder}/attachments` : 'attachments');
 }
 // Sync derives the destination from the current file, including after a move.

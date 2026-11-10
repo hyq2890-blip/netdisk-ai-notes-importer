@@ -10,6 +10,8 @@
 - src/settings.js：设置界面。
 - src/defaults.js：默认目录及设置。
 - src/webview.js：百度网盘页面识别、视频打开和播放定位。
+- 播放来源支持 `/pfile/video` 和带 `path`/`fsid` 的 `/fcb/edit`；只有确认当前页存在就绪播放器才自动关联后者。不要保存临时 `blob:` 媒体地址或通过打开其他视频来猜关联。
+- src/inline-import.js：网页标签页内的识别、导入进度、结果与重试；控件由 Obsidian 承载，不注入百度页面。
 - src/main.js：插件生命周期、导入、同步、配置迁移。
 - vendor/：原 main.js 内嵌的 Turndown 7.2.4 和 turndown-plugin-gfm 1.0.2，保持原有实现。
 - scripts/build.mjs：按固定顺序组合共享作用域中的源码并校验语法。

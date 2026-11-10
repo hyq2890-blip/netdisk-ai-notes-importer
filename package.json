@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "node scripts/verify-release.mjs",
-    "test": "node scripts/test.mjs && node scripts/test-folders.mjs"
+    "test": "node scripts/test.mjs && node scripts/test-folders.mjs && node scripts/test-import-safety.mjs && node scripts/test-inline-import.mjs && node scripts/test-embedded-video.mjs && node scripts/test-video-retry.mjs"
   },
   "engines": {
     "node": ">=18"
